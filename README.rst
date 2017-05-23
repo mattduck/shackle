@@ -102,6 +102,13 @@ The following key-value pairs are available:
   function is specified, it is called with zero arguments and must
   return any of the above alignments.
 
+- ``:close-on-realign`` and ``t``:
+
+  If the window is aligned, it will be deleted before displaying the next
+  window that has the same alignment. This has the effect that the new window
+  replaces the previous window, rather than stacking multiple windows with the
+  same alignment.
+
 - ``:size`` and number greater than zero:
 
   Aligned window use a default ratio of 0.5 to split up the original
@@ -163,9 +170,10 @@ The above section expressed as EBNF:
     FRAME_ACTION = ":frame" , T_OR_NIL .
 
     OPTIONAL_ACTIONS = { OPTIONAL_ACTION } .
-    OPTIONAL_ACTION = SELECT_ACTION | INHIBIT_WINDOW_QUIT_ACTION .
+    OPTIONAL_ACTION = SELECT_ACTION | INHIBIT_WINDOW_QUIT_ACTION | CLOSE_ON_REALIGN_ACTION .
     SELECT_ACTION = ":select" , T_OR_NIL .
     INHIBIT_WINDOW_QUIT_ACTION = ":inhibit-window-quit" , T_OR_NIL .
+    CLOSE_ON_REALIGN_ACTION = ":close-on-realign" , T_OR_NIL .
 
 Examples
 --------

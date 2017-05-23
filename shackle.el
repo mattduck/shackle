@@ -164,6 +164,11 @@ root window.
 Additionally to that, one can use a function called with zero
 arguments that must return any of the above alignments.
 
+:close-on-realign and t
+
+If the window is aligned, it will be deleted before displaying the next window
+that has the the same alignment.
+
 :size and a number greater than zero
 
 Use this option to specify a different size than the default
@@ -197,6 +202,7 @@ Pop to a frame instead of window."
                                              (const :tag "Left" 'left)
                                              (const :tag "Right" 'right)
                                              (function :tag "Function")))
+                                    ((const :tag "Close on realign" :close-on-realign) boolean)
                                     ((const :tag "Size" :size) number)
                                     ((const :tag "Frame" :frame) boolean))))
   :group 'shackle)
@@ -221,6 +227,7 @@ It's a plist with the same keys and values as described in
                                    (const :tag "Left" 'left)
                                    (const :tag "Right" 'right)
                                    (function :tag "Function")))
+                          ((const :tag "Close on realign" :close-on-realign) boolean)
                           ((const :tag "Size" :size) number)
                           ((const :tag "Frame" :frame) boolean)))
   :group 'shackle)
@@ -344,6 +351,15 @@ frame if possible, otherwise pop up a new frame."
 (defvar shackle-last-window nil
   "Last window displayed with shackle.")
 
+(defvar shackle--windows-to-close-on-realign
+  `(left  ,()
+    right ,()
+    above ,()
+    below ,())
+  "Plist mapping an alignment to a list of windows.  
+Used to track windows that should be closed if a new window 
+is aligned to the same direction.")
+
 (defun shackle--display-buffer-popup-window (buffer alist plist)
   "Display BUFFER in a popped up window.
 ALIST is passed to `window--display-buffer' internally.  If PLIST
@@ -362,6 +378,29 @@ window if possible."
                   shackle-last-buffer buffer))
           (unless (cdr (assq 'inhibit-switch-frame alist))
             (window--maybe-raise-frame (window-frame window))))))))
+
+(defun shackle--store-window-to-close-on-realign (alignment window)
+  "Store the current WINDOW to shackle--windows-to-close-on-realign.
+
+This allows Shackle to ensure the given window is closed when a
+new window is opened with a matching ALIGNMENT."
+  (let ((max-windows-to-store 10)
+        (window-list (plist-get shackle--windows-to-close-on-realign alignment)))
+    (if window-list 
+        (progn
+          (add-to-list 'window-list window)
+          (when (> (length window-list) max-windows-to-store)
+            (setq window-list (butlast window-list)))
+          (plist-put shackle--windows-to-close-on-realign alignment window-list))
+      (plist-put shackle--windows-to-close-on-realign alignment (list window)))))
+
+(defun shackle--close-window-for-alignment (alignment)
+  "Delete existing window matching ALIGNMENT."
+  (let ((windows-to-close (plist-get shackle--windows-to-close-on-realign alignment)))
+    (mapc (lambda (window)
+            (when (and window (window-live-p window))
+              (delete-window window)))
+          windows-to-close)))
 
 (defun shackle--display-buffer-aligned-window (buffer alist plist)
   "Display BUFFER in an aligned window.
@@ -383,6 +422,7 @@ the :size key with a number value."
                           (funcall shackle-default-alignment))
                          (t shackle-default-alignment)))
              (horizontal (when (memq alignment '(left right)) t))
+             (close-on-realign (plist-get plist :close-on-realign))
              (old-size (window-size (frame-root-window) horizontal))
              (size (or (plist-get plist :ratio) ; yey, backwards compatibility
                        (plist-get plist :size)
@@ -394,13 +434,16 @@ the :size key with a number value."
                 (> new-size (- old-size (if horizontal window-min-width
                                           window-min-height))))
             (error "Invalid alignment size %s, aborting" new-size)
+          (shackle--close-window-for-alignment alignment)
           (let ((window (split-window (frame-root-window frame)
                                       new-size alignment)))
             (prog1 (window--display-buffer buffer window 'window alist
                                            display-buffer-mark-dedicated)
               (when window
                 (setq shackle-last-window window
-                      shackle-last-buffer buffer))
+                      shackle-last-buffer buffer)
+                (when close-on-realign
+                  (shackle--store-window-to-close-on-realign alignment window)))
               (unless (cdr (assq 'inhibit-switch-frame alist))
                 (window--maybe-raise-frame frame)))))))))
 
