@@ -397,10 +397,11 @@ new window is opened with a matching ALIGNMENT."
 (defun shackle--close-window-for-alignment (alignment)
   "Delete existing window matching ALIGNMENT."
   (let ((windows-to-close (plist-get shackle--windows-to-close-on-realign alignment)))
-    (mapc (lambda (window)
-            (when (and window (window-live-p window))
-              (delete-window window)))
-          windows-to-close)))
+    (when (> (length (window-list)) 1)
+      (mapc (lambda (window)
+              (when (and window (window-live-p window))
+                (delete-window window)))
+            windows-to-close))))
 
 (defun shackle--display-buffer-aligned-window (buffer alist plist)
   "Display BUFFER in an aligned window.
