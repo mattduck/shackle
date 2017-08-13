@@ -36,6 +36,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'dash)
 
 (defgroup shackle nil
   "Enforce rules for popups"
@@ -169,6 +170,11 @@ arguments that must return any of the above alignments.
 If the window is aligned, it will be deleted before displaying the next window
 that has the the same alignment.
 
+:eyebrowse and the name of an eyebrowse tag
+
+If using eyebrowse, either create or move to the first eyebrowse workspace
+matching this tag.
+
 :size and a number greater than zero
 
 Use this option to specify a different size than the default
@@ -203,6 +209,7 @@ Pop to a frame instead of window."
                                              (const :tag "Right" 'right)
                                              (function :tag "Function")))
                                     ((const :tag "Close on realign" :close-on-realign) boolean)
+                                    ((const :tag "Eyebrowse tag" :eyebrowse) string)
                                     ((const :tag "Size" :size) number)
                                     ((const :tag "Frame" :frame) boolean))))
   :group 'shackle)
@@ -228,6 +235,7 @@ It's a plist with the same keys and values as described in
                                    (const :tag "Right" 'right)
                                    (function :tag "Function")))
                           ((const :tag "Close on realign" :close-on-realign) boolean)
+                          ((const :tag "Eyebrowse tag" :eyebrowse) string)
                           ((const :tag "Size" :size) number)
                           ((const :tag "Frame" :frame) boolean)))
   :group 'shackle)
@@ -424,6 +432,7 @@ the :size key with a number value."
                          (t shackle-default-alignment)))
              (horizontal (when (memq alignment '(left right)) t))
              (close-on-realign (plist-get plist :close-on-realign))
+             (eyebrowse-tag (plist-get plist :eyebrowse))
              (old-size (window-size (frame-root-window) horizontal))
              (size (or (plist-get plist :ratio) ; yey, backwards compatibility
                        (plist-get plist :size)
@@ -435,6 +444,8 @@ the :size key with a number value."
                 (> new-size (- old-size (if horizontal window-min-width
                                           window-min-height))))
             (error "Invalid alignment size %s, aborting" new-size)
+          (when eyebrowse-tag
+            (shackle--eyebrowse-switch-or-create-slot-by-tag eyebrowse-tag))
           (shackle--close-window-for-alignment alignment)
           (let ((window (split-window (frame-root-window frame)
                                       new-size alignment)))
@@ -489,6 +500,36 @@ window."
     (when (and (plist-get plist :select) (window-live-p window))
       (select-window window t))
     window)))
+
+
+;; TODO - provide these eyebrowse functions in eyebrowse?
+(defun shackle--eyebrowse-get-slot-matching-tag (tag)
+  "Eyebrowse utility function. Return first eyebrowse slot
+matching TAG."
+  (car  ;; Slot number is first item in window config
+   (nth 0  ; First config matching the tag
+        (-filter (lambda (config)
+                   (string=
+                    (nth 2 config)  ;; Tag index for the config
+                    tag))
+                 (eyebrowse--get 'window-configs)))))
+
+(defun shackle--eyebrowse-switch-or-create-slot-by-tag (tag)
+  "Eyebrowse utility function. Create or switch to the first
+eyebrowse slot matching TAG."
+  (let ((existing-slot (shackle--eyebrowse-get-slot-matching-tag tag)))
+    (if existing-slot
+        (eyebrowse-switch-to-window-config existing-slot)
+      (eyebrowse-create-window-config)
+      (eyebrowse-rename-window-config (eyebrowse--get 'current-slot) tag))))
+
+(defun shackle--eyebrowse-close-slot-by-tag (tag)
+  "Eyebrowse utility function. Close the first eyebrowse slot
+matching TAG."
+  (let ((existing-slot (shackle--eyebrowse-get-slot-matching-tag tag)))
+    (eyebrowse-switch-to-window-config existing-slot)
+    (eyebrowse-close-window-config)))
+      
 
 ;;;###autoload
 (define-minor-mode shackle-mode
