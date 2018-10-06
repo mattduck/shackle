@@ -199,6 +199,7 @@ Pop to a frame instead of window."
                                     ((const :tag "Ignore" :ignore) boolean)
                                     ((const :tag "Other" :other) boolean)
                                     ((const :tag "Same" :same) boolean)
+                                    ((const :tag "Only" :only) boolean)
                                     ((const :tag "Popup" :popup) boolean)
                                     ((const :tag "Align" :align)
                                      (choice :tag "Alignment" :value t
@@ -225,6 +226,7 @@ It's a plist with the same keys and values as described in
                           ((const :tag "Ignore" :ignore) boolean)
                           ((const :tag "Other" :other) boolean)
                           ((const :tag "Same" :same) boolean)
+                          ((const :tag "Only" :only) boolean)
                           ((const :tag "Popup" :popup) boolean)
                           ((const :tag "Align" :align)
                            (choice :value t
@@ -364,8 +366,8 @@ frame if possible, otherwise pop up a new frame."
     right ,()
     above ,()
     below ,())
-  "Plist mapping an alignment to a list of windows.  
-Used to track windows that should be closed if a new window 
+  "Plist mapping an alignment to a list of windows.
+Used to track windows that should be closed if a new window
 is aligned to the same direction.")
 
 (defun shackle--display-buffer-popup-window (buffer alist plist)
@@ -394,7 +396,7 @@ This allows Shackle to ensure the given window is closed when a
 new window is opened with a matching ALIGNMENT."
   (let ((max-windows-to-store 10)
         (window-list (plist-get shackle--windows-to-close-on-realign alignment)))
-    (if window-list 
+    (if window-list
         (progn
           (add-to-list 'window-list window)
           (when (> (length window-list) max-windows-to-store)
@@ -433,6 +435,7 @@ the :size key with a number value."
              (horizontal (when (memq alignment '(left right)) t))
              (close-on-realign (plist-get plist :close-on-realign))
              (eyebrowse-tag (plist-get plist :eyebrowse))
+             (only (plist-get plist :only))
              (old-size (window-size (frame-root-window) horizontal))
              (size (or (plist-get plist :ratio) ; yey, backwards compatibility
                        (plist-get plist :size)
@@ -457,7 +460,9 @@ the :size key with a number value."
                 (when close-on-realign
                   (shackle--store-window-to-close-on-realign alignment window)))
               (unless (cdr (assq 'inhibit-switch-frame alist))
-                (window--maybe-raise-frame frame)))))))))
+                (window--maybe-raise-frame frame))
+              (when only
+                (delete-other-windows window)))))))))
 
 (defun shackle--display-buffer (buffer alist plist)
   "Internal function for `shackle-display-buffer'.
@@ -529,7 +534,7 @@ matching TAG."
   (let ((existing-slot (shackle--eyebrowse-get-slot-matching-tag tag)))
     (eyebrowse-switch-to-window-config existing-slot)
     (eyebrowse-close-window-config)))
-      
+
 
 ;;;###autoload
 (define-minor-mode shackle-mode
