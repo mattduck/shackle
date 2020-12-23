@@ -102,6 +102,13 @@ The following key-value pairs are available:
   function is specified, it is called with zero arguments and must
   return any of the above alignments.
 
+- ``:close-on-realign`` and ``t``:
+
+  If the window is aligned, it will be deleted before displaying the next
+  window that has the same alignment. This has the effect that the new window
+  replaces the previous window, rather than stacking multiple windows with the
+  same alignment.
+
 - ``:size`` and number greater than zero:
 
   Aligned window use a default ratio of 0.5 to split up the original
@@ -163,9 +170,37 @@ The above section expressed as EBNF:
     FRAME_ACTION = ":frame" , T_OR_NIL .
 
     OPTIONAL_ACTIONS = { OPTIONAL_ACTION } .
-    OPTIONAL_ACTION = SELECT_ACTION | INHIBIT_WINDOW_QUIT_ACTION .
+    OPTIONAL_ACTION = SELECT_ACTION | INHIBIT_WINDOW_QUIT_ACTION | CLOSE_ON_REALIGN_ACTION .
     SELECT_ACTION = ":select" , T_OR_NIL .
     INHIBIT_WINDOW_QUIT_ACTION = ":inhibit-window-quit" , T_OR_NIL .
+    CLOSE_ON_REALIGN_ACTION = ":close-on-realign" , T_OR_NIL .
+
+Troubleshooting
+---------------
+
+In case your rules don't have any effect on a package, you can enable
+tracing of calls to ``display-buffer`` and other functions using it
+with ``M-x shackle-trace-functions``, perform the action displaying
+the buffer and check the ``*shackle trace*`` buffer for the displayed
+buffer.  If nothing shows up, the package isn't using
+``display-buffer`` at all, there isn't much you can do in that case
+other than asking its author to reconsider using it.  If it does,
+one of the following might be the case:
+
+- Your rule fails matching the buffer.  This might be due to a typo in
+  the buffer name, an erroneous regular expression when used with
+  ``:regex t`` or in the case of a major mode, the major mode not
+  being enabled at the time of the matching.  The latter must be fixed
+  for the package.
+- The package overrides ``display-buffer-alist``.  I believe this to
+  be a fundamental misunderstanding on the behalf of package authors
+  as this variable is a user customizable option, tampering with it
+  is questionable and should ideally be resolved by themselves.
+- The package relies on the displayed buffer not being selected,
+  therefore breaking once someone customizes their Emacs to select
+  displayed buffers by default.  I also believe this to be an error on
+  behalf of package authors, albeit not as grave as the previous one.
+  Please contact them so that the package gets fixed.
 
 Examples
 --------

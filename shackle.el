@@ -4,7 +4,7 @@
 
 ;; Author: Vasilij Schneidermann <v.schneidermann@gmail.com>
 ;; URL: https://github.com/wasamasa/shackle
-;; Version: 0.9.2
+;; Version: 1.0.0
 ;; Keywords: convenience
 ;; Package-Requires: ((cl-lib "0.5"))
 
@@ -36,6 +36,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'dash)
 
 (defgroup shackle nil
   "Enforce rules for popups"
@@ -164,6 +165,16 @@ root window.
 Additionally to that, one can use a function called with zero
 arguments that must return any of the above alignments.
 
+:close-on-realign and t
+
+If the window is aligned, it will be deleted before displaying the next window
+that has the the same alignment.
+
+:eyebrowse and the name of an eyebrowse tag
+
+If using eyebrowse, either create or move to the first eyebrowse workspace
+matching this tag.
+
 :size and a number greater than zero
 
 Use this option to specify a different size than the default
@@ -188,6 +199,7 @@ Pop to a frame instead of window."
                                     ((const :tag "Ignore" :ignore) boolean)
                                     ((const :tag "Other" :other) boolean)
                                     ((const :tag "Same" :same) boolean)
+                                    ((const :tag "Only" :only) boolean)
                                     ((const :tag "Popup" :popup) boolean)
                                     ((const :tag "Align" :align)
                                      (choice :tag "Alignment" :value t
@@ -197,6 +209,8 @@ Pop to a frame instead of window."
                                              (const :tag "Left" 'left)
                                              (const :tag "Right" 'right)
                                              (function :tag "Function")))
+                                    ((const :tag "Close on realign" :close-on-realign) boolean)
+                                    ((const :tag "Eyebrowse tag" :eyebrowse) string)
                                     ((const :tag "Size" :size) number)
                                     ((const :tag "Frame" :frame) boolean))))
   :group 'shackle)
@@ -212,6 +226,7 @@ It's a plist with the same keys and values as described in
                           ((const :tag "Ignore" :ignore) boolean)
                           ((const :tag "Other" :other) boolean)
                           ((const :tag "Same" :same) boolean)
+                          ((const :tag "Only" :only) boolean)
                           ((const :tag "Popup" :popup) boolean)
                           ((const :tag "Align" :align)
                            (choice :value t
@@ -221,6 +236,8 @@ It's a plist with the same keys and values as described in
                                    (const :tag "Left" 'left)
                                    (const :tag "Right" 'right)
                                    (function :tag "Function")))
+                          ((const :tag "Close on realign" :close-on-realign) boolean)
+                          ((const :tag "Eyebrowse tag" :eyebrowse) string)
                           ((const :tag "Size" :size) number)
                           ((const :tag "Frame" :frame) boolean)))
   :group 'shackle)
@@ -356,6 +373,15 @@ available frame if possible, otherwise pop up a new frame."
 (defvar shackle-last-window nil
   "Last window displayed with shackle.")
 
+(defvar shackle--windows-to-close-on-realign
+  `(left  ,()
+    right ,()
+    above ,()
+    below ,())
+  "Plist mapping an alignment to a list of windows.
+Used to track windows that should be closed if a new window
+is aligned to the same direction.")
+
 (defun shackle--display-buffer-popup-window (buffer alist plist)
   "Display BUFFER in a popped up window.
 ALIST is passed to `shackle--window-display-buffer' internally.
@@ -373,6 +399,30 @@ available window if possible."
                   shackle-last-buffer buffer))
           (unless (cdr (assq 'inhibit-switch-frame alist))
             (window--maybe-raise-frame (window-frame window))))))))
+
+(defun shackle--store-window-to-close-on-realign (alignment window)
+  "Store the current WINDOW to shackle--windows-to-close-on-realign.
+
+This allows Shackle to ensure the given window is closed when a
+new window is opened with a matching ALIGNMENT."
+  (let ((max-windows-to-store 10)
+        (window-list (plist-get shackle--windows-to-close-on-realign alignment)))
+    (if window-list
+        (progn
+          (add-to-list 'window-list window)
+          (when (> (length window-list) max-windows-to-store)
+            (setq window-list (butlast window-list)))
+          (plist-put shackle--windows-to-close-on-realign alignment window-list))
+      (plist-put shackle--windows-to-close-on-realign alignment (list window)))))
+
+(defun shackle--close-window-for-alignment (alignment)
+  "Delete existing window matching ALIGNMENT."
+  (let ((windows-to-close (plist-get shackle--windows-to-close-on-realign alignment)))
+    (when (> (length (window-list)) 1)
+      (mapc (lambda (window)
+              (when (and window (window-live-p window))
+                (delete-window window)))
+            windows-to-close))))
 
 (defun shackle--display-buffer-aligned-window (buffer alist plist)
   "Display BUFFER in an aligned window.
@@ -394,6 +444,9 @@ the :size key with a number value."
                           (funcall shackle-default-alignment))
                          (t shackle-default-alignment)))
              (horizontal (when (memq alignment '(left right)) t))
+             (close-on-realign (plist-get plist :close-on-realign))
+             (eyebrowse-tag (plist-get plist :eyebrowse))
+             (only (plist-get plist :only))
              (old-size (window-size (frame-root-window) horizontal))
              (size (or (plist-get plist :ratio) ; yey, backwards compatibility
                        (plist-get plist :size)
@@ -405,14 +458,21 @@ the :size key with a number value."
                 (> new-size (- old-size (if horizontal window-min-width
                                           window-min-height))))
             (error "Invalid alignment size %s, aborting" new-size)
+          (when eyebrowse-tag
+            (shackle--eyebrowse-switch-or-create-slot-by-tag eyebrowse-tag))
+          (shackle--close-window-for-alignment alignment)
           (let ((window (split-window (frame-root-window frame)
                                       new-size alignment)))
             (prog1 (shackle--window-display-buffer buffer window 'window alist)
               (when window
                 (setq shackle-last-window window
-                      shackle-last-buffer buffer))
+                      shackle-last-buffer buffer)
+                (when close-on-realign
+                  (shackle--store-window-to-close-on-realign alignment window)))
               (unless (cdr (assq 'inhibit-switch-frame alist))
-                (window--maybe-raise-frame frame)))))))))
+                (window--maybe-raise-frame frame))
+              (when only
+                (delete-other-windows window)))))))))
 
 (defun shackle--display-buffer (buffer alist plist)
   "Internal function for `shackle-display-buffer'.
@@ -456,6 +516,36 @@ window."
       (select-window window t))
     window)))
 
+
+;; TODO - provide these eyebrowse functions in eyebrowse?
+(defun shackle--eyebrowse-get-slot-matching-tag (tag)
+  "Eyebrowse utility function. Return first eyebrowse slot
+matching TAG."
+  (car  ;; Slot number is first item in window config
+   (nth 0  ; First config matching the tag
+        (-filter (lambda (config)
+                   (string=
+                    (nth 2 config)  ;; Tag index for the config
+                    tag))
+                 (eyebrowse--get 'window-configs)))))
+
+(defun shackle--eyebrowse-switch-or-create-slot-by-tag (tag)
+  "Eyebrowse utility function. Create or switch to the first
+eyebrowse slot matching TAG."
+  (let ((existing-slot (shackle--eyebrowse-get-slot-matching-tag tag)))
+    (if existing-slot
+        (eyebrowse-switch-to-window-config existing-slot)
+      (eyebrowse-create-window-config)
+      (eyebrowse-rename-window-config (eyebrowse--get 'current-slot) tag))))
+
+(defun shackle--eyebrowse-close-slot-by-tag (tag)
+  "Eyebrowse utility function. Close the first eyebrowse slot
+matching TAG."
+  (let ((existing-slot (shackle--eyebrowse-get-slot-matching-tag tag)))
+    (eyebrowse-switch-to-window-config existing-slot)
+    (eyebrowse-close-window-config)))
+
+
 ;;;###autoload
 (define-minor-mode shackle-mode
   "Toggle `shackle-mode'.
@@ -471,6 +561,37 @@ popups in Emacs."
           (remove '(shackle-display-buffer-condition
                     shackle-display-buffer-action)
                   display-buffer-alist))))
+
+
+;; debugging support
+
+(require 'trace)
+
+(defcustom shackle-trace-buffer "*shackle trace*"
+  "Name of the buffer for tracing `shackle-traced-functions'."
+  :type 'string
+  :group 'shackle)
+
+(defcustom shackle-traced-functions
+  '(display-buffer
+    pop-to-buffer
+    pop-to-buffer-same-window
+    switch-to-buffer-other-window
+    switch-to-buffer-other-frame)
+  "List of `display-buffer'-style functions to trace."
+  :type '(list function))
+
+(defun shackle-trace-functions ()
+  "Enable tracing `shackle-traced-functions'."
+  (interactive)
+  (dolist (function shackle-traced-functions)
+    (trace-function-background function shackle-trace-buffer)))
+
+(defun shackle-untrace-functions ()
+  "Enable tracing `shackle-traced-functions'."
+  (interactive)
+  (dolist (function shackle-traced-functions)
+    (untrace-function function shackle-trace-buffer)))
 
 (provide 'shackle)
 ;;; shackle.el ends here
